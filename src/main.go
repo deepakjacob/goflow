@@ -6,7 +6,6 @@ import (
 	"f"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"time"
 )
@@ -31,26 +30,33 @@ func githubTask(in *f.Input) (*f.Output, error) {
 	req, err := http.NewRequest(
 		http.MethodGet, "http://api.github.com/users/"+user, nil)
 	if err != nil {
-		log.Fatal("Error getting github profile for user", user)
+		err := errors.New("Error getting github profile for user " + user)
+		return nil, err
+
 	}
 
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatal("Error getting github profile for user", user)
+		fmt.Println("Error is ", err)
+		//log.Fatal("Error getting github profile for user", user)
+		err := errors.New("Error getting github profile for the user " + user)
+		return nil, err
 	}
 
 	defer resp.Body.Close()
 
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal("Error parsing github profile for user", user)
+		err := errors.New("Error parsing github profile for user " + user)
+		return nil, err
 	}
 	profile := GithubProfile{}
 	jsonErr := json.Unmarshal(body, &profile)
 	if jsonErr != nil {
-		log.Fatal(jsonErr)
+		//log.Fatal(jsonErr)
+		return nil, jsonErr
 	}
 	//fmt.Println(profile.Name)
 	out := &f.Output{}
@@ -85,18 +91,30 @@ func toOutput(value interface{}) *f.Output {
 func main() {
 	flow := f.New("sample")
 	s1 := f.NewState("state-1")
+	s1.SetConcurrent(true)
 	s1.AddTasks(
 		f.Task{
 			Name: "Task-1: Get user profile from Github",
 			Execute: func(in *f.Input) (*f.Output, error) {
+				time.Sleep(1 * time.Second)
 				return githubTask(in)
 			},
 		},
 		f.Task{
-			Name: "Task-2: Do someting with user profile",
+			Name: "Task-2: Do someting with user profile2",
 			Execute: func(in *f.Input) (*f.Output, error) {
-				out := toOutput(getGoogleProfile())
-				return out, nil
+				time.Sleep(3 * time.Second)
+				//out := toOutput(getGoogleProfile())
+				return githubTask(in)
+				//return out, nil
+			},
+		},
+		f.Task{
+			Name: "Task-3: Do someting with user profile3",
+			Execute: func(in *f.Input) (*f.Output, error) {
+				//out := toOutput(getGoogleProfile())
+				return githubTask(in)
+				//return out, nil
 			},
 		},
 	)

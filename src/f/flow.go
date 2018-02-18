@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 )
 
 // Result output returned after execution of a flow, state and tasks
@@ -101,20 +102,38 @@ type Validator interface {
 
 //State contract to be implemented by state
 type State interface {
-	GetName() string
 	fmt.Stringer
 	// Validator - state can be validated
 	Validator
 	// AddTasks adds tasks to a state. It is expected that AddState(..)
 	// to be called before a state begins to execute
 	AddTasks(...Task)
-	GetTasks() []Task
 	Execute(in *Input) (*Output, error)
+	GetName() string
+	GetTasks() []Task
+	SetConcurrent(bool)
 }
 
 type flowState struct {
-	Name  string
-	Tasks []Task
+	Concurrent bool
+	Name       string
+	Tasks      []Task
+}
+
+func (fs *flowState) SetConcurrent(concurrent bool) {
+	fs.Concurrent = concurrent
+}
+
+func (fs *flowState) GetName() string {
+	return fs.Name
+}
+
+func (fs flowState) onError(err error) {
+	fmt.Println("Error -> %t", err)
+}
+
+func (fs flowState) onOutput(out *Output) {
+	fmt.Println("Out -> %t", out)
 }
 
 // NewState create, initiaize and return a new flow state
@@ -122,10 +141,6 @@ type flowState struct {
 func NewState(name string) State /* State */ {
 	fs := &flowState{Name: name}
 	return fs
-}
-
-func (fs *flowState) GetName() string {
-	return fs.Name
 }
 
 func (fs flowState) String() string {
@@ -156,9 +171,53 @@ func (fs flowState) Execute(in *Input) (*Output, error) {
 	if fs.Tasks == nil {
 		fmt.Println("No tasks found for state ", fs.GetName())
 	}
+	if fs.Concurrent {
+		return executeAsync(fs, in)
+	}
+	return executeSync(fs, in)
+}
 
-	var out *Output
-	var err error
+func executeAsync(fs flowState, in *Input) (*Output, error) {
+	var wg sync.WaitGroup
+	wg.Add(len(fs.Tasks))
+	fmt.Println(
+		"Concurrently executing tasks - ", fs.GetName())
+
+	for _, task := range fs.Tasks {
+		outChan := make(chan *Output)
+		errChan := make(chan error)
+		go func(task Task) {
+			fmt.Println("Begin async execute - ", task.Name)
+			out, err := task.Execute(in)
+			if err != nil {
+				errChan <- err
+			}
+			outChan <- out
+			wg.Done()
+			fmt.Println("End async execute -   ", task.Name)
+
+		}(task)
+
+		go func() {
+			select {
+			case out := <-outChan:
+				fs.onOutput(out)
+
+			case err := <-errChan:
+				fs.onError(err)
+			}
+		}()
+
+	}
+	wg.Wait()
+	return nil, nil
+}
+
+func executeSync(fs flowState, in *Input) (*Output, error) {
+	var (
+		out *Output
+		err error
+	)
 	for _, task := range fs.Tasks {
 		fmt.Println("Executing tasks         - ", task.Name)
 		// fmt.Println("In data  - ", in.Data)
